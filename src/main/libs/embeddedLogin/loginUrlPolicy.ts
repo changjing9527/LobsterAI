@@ -13,6 +13,8 @@ export const NETEASE_LOGIN_ORIGINS: readonly string[] = ['https://login.netease.
 const DEFAULT_PORTAL_LOGIN_PATH = '/portal#/login';
 const EXTERNAL_LINK_DOMAINS = ['youdao.com', '163.com', 'netease.com'];
 const AUTH_CODE_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PORTAL_LOGIN_ROUTES = new Set(['/login', '/enterprise/identity-select']);
+const AUTH_API_PATH_PREFIX = '/api/auth/';
 
 export interface LoginUrlOptions {
   testMode: boolean;
@@ -123,7 +125,17 @@ export function decideNavigation(rawUrl: string, isMainFrame: boolean, policy: N
   const url = parseWebUrl(rawUrl);
   if (!url) return 'block';
   if (!isMainFrame) return 'allow';
-  return url.protocol === 'https:' && policy.allowedTopLevelOrigins.has(url.origin) ? 'allow' : 'block';
+  if (url.protocol !== 'https:' || !policy.allowedTopLevelOrigins.has(url.origin)) return 'block';
+  if (url.origin === policy.target.origin) {
+    if (url.pathname.startsWith(AUTH_API_PATH_PREFIX)) return 'allow';
+    const route = url.hash.startsWith('#/') ? new URL(url.hash.slice(1), url.origin) : url;
+    const portalBase = policy.target.completionPath.slice(0, -EMBEDDED_LOGIN_COMPLETION_PATH.length);
+    const validEntry = !url.hash.startsWith('#/')
+      || url.pathname === portalBase || `${url.pathname}/` === portalBase;
+    return validEntry && PORTAL_LOGIN_ROUTES.has(route.pathname) ? 'allow' : 'block';
+  }
+  // API origins only host the authentication redirect; the NetEase origin hosts employee sign-in.
+  return NETEASE_LOGIN_ORIGINS.includes(url.origin) || url.pathname.startsWith(AUTH_API_PATH_PREFIX) ? 'allow' : 'block';
 }
 
 export function isExternalLinkAllowed(rawUrl: string): boolean {

@@ -1,4 +1,3 @@
-import { XMarkIcon } from '@heroicons/react/24/outline';
 import { AuthLoginFailureReason } from '@shared/auth/constants';
 import {
   CustomBoostAmount,
@@ -11,7 +10,7 @@ import {
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSelector } from 'react-redux';
 
-import Modal from '../../../components/common/Modal';
+import ClientAccountPage from '../../../components/common/ClientAccountPage';
 import PurchaseOfferCountdown from '../../../components/PurchaseOfferCountdown';
 import { authService, getLoginFailureMessage } from '../../../services/auth';
 import { getPortalPricingUrl } from '../../../services/endpoints';
@@ -64,7 +63,7 @@ const PurchaseDialog: React.FC<PurchaseDialogProps> = ({ options, onClose }) => 
   const isLoggedIn = useSelector((state: RootState) => state.auth.isLoggedIn);
   const ownerAccountKey = useSelector((state: RootState) => state.auth.ownerAccountKey);
   const purchaseOffer = useSelector((state: RootState) => state.auth.purchaseOffer);
-  const [tab, setTab] = useState<PurchaseTab>(options.tab ?? 'subscription');
+  const [tab, setTab] = useState<PurchaseTab>(options.tab === 'boost' ? 'boost' : 'subscription');
   const [catalog, setCatalog] = useState<Loadable<PaymentCatalog>>({ status: 'loading' });
   const [catalogAttempt, setCatalogAttempt] = useState(0);
   const [planId, setPlanId] = useState<number | null>(null);
@@ -289,27 +288,14 @@ const PurchaseDialog: React.FC<PurchaseDialogProps> = ({ options, onClose }) => 
       .replace('{price}', payable === null ? '' : formatYuan(payable));
 
   return (
-    <Modal
-      onClose={onClose}
-      onEscape={onClose}
-      overlayClassName="fixed inset-0 z-[10050] flex items-center justify-center modal-backdrop px-4"
-      className="modal-content flex max-h-[90vh] w-full max-w-[480px] flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-modal"
-    >
+    <ClientAccountPage title={t('purchaseCenterTitle')} onBack={onClose}>
+      <div className="mx-auto flex min-h-0 w-full max-w-[960px] flex-1 flex-col overflow-y-auto px-6 py-6">
       {checkout ? (
-        <PaymentCheckout request={checkout} onBack={() => setCheckout(null)} onClose={onClose} />
+        <div className="mx-auto w-full max-w-[480px]">
+          <PaymentCheckout request={checkout} onBack={() => setCheckout(null)} onClose={onClose} />
+        </div>
       ) : (
         <>
-          <div className="flex items-center justify-between px-5 pt-5">
-            <h2 className="text-base font-semibold text-foreground">{t('purchaseCenterTitle')}</h2>
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label={t('close')}
-              className="-mr-1 rounded-lg p-1 text-secondary transition-colors hover:bg-surface-raised hover:text-foreground"
-            >
-              <XMarkIcon className="h-5 w-5" />
-            </button>
-          </div>
           <div className="mx-5 mt-4 grid grid-cols-2 gap-1 rounded-lg bg-surface-raised p-1 text-sm" role="tablist">
             {(['subscription', 'boost'] as const).map(value => (
               <button
@@ -411,7 +397,8 @@ const PurchaseDialog: React.FC<PurchaseDialogProps> = ({ options, onClose }) => 
           )}
         </>
       )}
-    </Modal>
+      </div>
+    </ClientAccountPage>
   );
 };
 

@@ -39,6 +39,7 @@ import EngineFailureOverlay from './components/cowork/EngineFailureOverlay';
 import EngineStartupOverlay from './components/cowork/EngineStartupOverlay';
 import KitsView from './components/kits/KitsView';
 import LibraryView from './components/library/LibraryView';
+import EmbeddedLoginView from './components/login/EmbeddedLoginView';
 import FirstRunLoginIntroduction from './components/login/FirstRunLoginIntroduction';
 import NewUserOnboardingOverlay, {
   NewUserOnboardingStep,
@@ -2107,6 +2108,7 @@ const App: React.FC = () => {
         enabled={privacyAgreed === true && !isEnterpriseAccount}
       />
       <PurchaseCenter />
+      <EmbeddedLoginView />
       {windowsStandaloneTitleBar}
       <div
         className="relative flex flex-1 min-h-0 overflow-hidden"

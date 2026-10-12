@@ -22,6 +22,7 @@ import {
 import {
   AuthIpcChannel,
   type AuthLifecycleEvent,
+  type AuthLoginViewBounds,
   type AuthSessionChangedEvent,
 } from '../shared/auth/constants';
 import {
@@ -102,6 +103,7 @@ import {
 import { McpIpcChannel } from '../shared/mcp/constants';
 import { OpenClawEngineIpc } from '../shared/openclawEngine/constants';
 import { type PaymentBridge, PaymentIpc } from '../shared/payment/constants';
+import { EmbeddedPricingIpc, type EmbeddedPricingState } from '../shared/payment/embeddedPricing';
 import { PermissionIpcChannel } from '../shared/permissions/constants';
 import type { Platform } from '../shared/platform';
 import {
@@ -1106,6 +1108,14 @@ contextBridge.exposeInMainWorld('electron', {
     status: () => ipcRenderer.invoke(SubscriptionTrialIpc.Status),
   },
   payment: {
+    openPricing: options => ipcRenderer.invoke(EmbeddedPricingIpc.Open, options),
+    closePricing: () => ipcRenderer.invoke(EmbeddedPricingIpc.Close),
+    setPricingBounds: bounds => ipcRenderer.invoke(EmbeddedPricingIpc.SetBounds, bounds),
+    onPricingStateChanged: callback => {
+      const handler = (_event: Electron.IpcRendererEvent, state: EmbeddedPricingState) => callback(state);
+      ipcRenderer.on(EmbeddedPricingIpc.StateChanged, handler);
+      return () => ipcRenderer.removeListener(EmbeddedPricingIpc.StateChanged, handler);
+    },
     getAvailability: () => ipcRenderer.invoke(PaymentIpc.GetAvailability),
     getCatalog: () => ipcRenderer.invoke(PaymentIpc.GetCatalog),
     quote: input => ipcRenderer.invoke(PaymentIpc.Quote, input),
@@ -1369,6 +1379,13 @@ contextBridge.exposeInMainWorld('electron', {
   },
   auth: {
     login: () => ipcRenderer.invoke(AuthIpcChannel.Login),
+    cancelLogin: () => ipcRenderer.invoke(AuthIpcChannel.CancelLogin),
+    setLoginViewBounds: (bounds: AuthLoginViewBounds) => ipcRenderer.invoke(AuthIpcChannel.SetLoginViewBounds, bounds),
+    onLoginViewChanged: (callback: (visible: boolean) => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, visible: boolean) => callback(visible);
+      ipcRenderer.on(AuthIpcChannel.LoginViewChanged, handler);
+      return () => ipcRenderer.removeListener(AuthIpcChannel.LoginViewChanged, handler);
+    },
     getUser: () => ipcRenderer.invoke(AuthIpcChannel.GetUser),
     getQuota: () => ipcRenderer.invoke(AuthIpcChannel.GetQuota),
     logout: () => ipcRenderer.invoke(AuthIpcChannel.Logout),

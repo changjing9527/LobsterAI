@@ -1,41 +1,63 @@
 import { EventEmitter } from 'node:events';
 
-import type { BrowserWindow, BrowserWindowConstructorOptions, Session } from 'electron';
+import type { BrowserWindow, Session, WebContentsView, WebContentsViewConstructorOptions } from 'electron';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { AuthLoginFailureReason } from '../../../shared/auth/constants';
+import { ClientAccountLayout } from '../../../shared/payment/embeddedPricing';
 import { EmbeddedLoginError, openEmbeddedLoginWindow } from './embeddedLoginWindow';
 import type { NavigationPolicy } from './loginUrlPolicy';
 
 class FakeWebContents extends EventEmitter {
+  destroyed = false;
+  loadedUrl: string | null = null;
+  focused = false;
+  isDestroyed() { return this.destroyed; }
+  getZoomFactor() { return 1; }
+  close() {
+    this.destroyed = true;
+    this.emit('destroyed');
+  }
+  loadURL(url: string) {
+    this.loadedUrl = url;
+    return Promise.resolve();
+  }
+  focus() { this.focused = true; }
   windowOpenHandler: ((details: { url: string }) => { action: string }) | null = null;
   setWindowOpenHandler(handler: (details: { url: string }) => { action: string }) {
     this.windowOpenHandler = handler;
   }
 }
 
+class FakeView {
+  webContents = new FakeWebContents();
+  bounds: { x: number; y: number; width: number; height: number } | null = null;
+  constructor(readonly options: WebContentsViewConstructorOptions) {}
+  get destroyed() { return this.webContents.destroyed; }
+  get loadedUrl() { return this.webContents.loadedUrl; }
+  get focused() { return this.webContents.focused; }
+  close() { this.webContents.close(); }
+  setBounds(bounds: { x: number; y: number; width: number; height: number }) { this.bounds = bounds; }
+  setBackgroundColor() {}
+  setVisible() {}
+}
+
 class FakeWindow extends EventEmitter {
   webContents = new FakeWebContents();
   destroyed = false;
-  loadedUrl: string | null = null;
-  focused = false;
-  constructor(readonly options: BrowserWindowConstructorOptions) {
-    super();
-  }
+  width = 1280;
+  height = 800;
+  contentView = { addChildView: vi.fn(), removeChildView: vi.fn() };
   isDestroyed() { return this.destroyed; }
+  getContentBounds() { return { x: 0, y: 0, width: this.width, height: this.height }; }
   close() {
     if (this.destroyed) return;
     this.destroyed = true;
     this.emit('closed');
   }
-  loadURL(url: string) {
-    this.loadedUrl = url;
-    return Promise.resolve();
-  }
-  setMenu() {}
   isMinimized() { return false; }
   restore() {}
-  focus() { this.focused = true; }
+  focus() {}
 }
 
 type PermissionRequestHandler = (webContents: unknown, permission: string, callback: (granted: boolean) => void) => void;
@@ -80,7 +102,9 @@ function navigation(url: string, isMainFrame = true) {
 }
 
 function open(overrides: { timeoutMs?: number; isDev?: boolean } = {}) {
-  let window!: FakeWindow;
+  let window!: FakeView;
+  const parent = new FakeWindow();
+  const onViewChanged = vi.fn();
   let partition = '';
   const loginSession = new FakeSession();
   const openExternal = vi.fn();
@@ -88,20 +112,20 @@ function open(overrides: { timeoutMs?: number; isDev?: boolean } = {}) {
     loginUrl: 'https://lobsterai.youdao.com/portal#/login?transport=embedded',
     policy,
     timeoutMs: overrides.timeoutMs ?? 60_000,
-    title: 'Sign in',
     isDev: overrides.isDev ?? false,
-    parent: null,
-    createWindow: options => {
-      window = new FakeWindow(options);
-      return window as unknown as BrowserWindow;
+    parent: parent as unknown as BrowserWindow,
+    createView: options => {
+      window = new FakeView(options);
+      return window as unknown as WebContentsView;
     },
+    onViewChanged,
     sessionFromPartition: name => {
       partition = name;
       return loginSession as unknown as Session;
     },
     openExternal,
   });
-  return { handle, window, loginSession, openExternal, partition };
+  return { handle, window, parent, onViewChanged, loginSession, openExternal, partition };
 }
 
 afterEach(() => {
@@ -110,7 +134,7 @@ afterEach(() => {
 
 describe('openEmbeddedLoginWindow', () => {
   test('uses an isolated in-memory session with hardened preferences', () => {
-    const { handle, window, partition } = open();
+    const { handle, window, parent, onViewChanged, partition } = open();
     handle.result.catch(() => undefined);
 
     expect(partition).toMatch(/^lobsterai-login-[0-9a-f-]{36}$/);
@@ -124,6 +148,9 @@ describe('openEmbeddedLoginWindow', () => {
     });
     expect(window.options.webPreferences?.preload).toBeUndefined();
     expect(window.loadedUrl).toBe('https://lobsterai.youdao.com/portal#/login?transport=embedded');
+    expect(parent.contentView.addChildView).toHaveBeenCalledWith(window);
+    expect(window.bounds).toEqual({ x: 0, y: ClientAccountLayout.HeaderHeight, width: 1280, height: 800 - ClientAccountLayout.HeaderHeight });
+    expect(onViewChanged).toHaveBeenCalledWith(true);
     window.close();
   });
 
@@ -238,5 +265,22 @@ describe('openEmbeddedLoginWindow', () => {
 
     expect(window.focused).toBe(true);
     window.close();
+  });
+
+  test('resizes within the client and removes the view on Back without closing the client', async () => {
+    const { handle, window, parent, onViewChanged } = open();
+    handle.setBounds({ x: 0, y: 100, width: 1280, height: 700 });
+    parent.width = 1600;
+    parent.height = 900;
+    parent.emit('resize');
+    expect(window.bounds).toEqual({ x: 0, y: 100, width: 1600, height: 800 });
+
+    handle.close();
+
+    await expect(handle.result).rejects.toEqual(new EmbeddedLoginError(AuthLoginFailureReason.Cancelled));
+    expect(parent.destroyed).toBe(false);
+    expect(parent.contentView.removeChildView).toHaveBeenCalledWith(window);
+    expect(onViewChanged).toHaveBeenLastCalledWith(false);
+    expect(parent.listenerCount('resize')).toBe(0);
   });
 });

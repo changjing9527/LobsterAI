@@ -16,7 +16,7 @@ interface ExchangeResult {
 
 function harness(completion: Promise<EmbeddedLoginCompletion>) {
   const focus = vi.fn();
-  const openWindow = vi.fn((_url: string, _policy: NavigationPolicy) => ({ result: completion, focus }));
+  const openWindow = vi.fn((_url: string, _policy: NavigationPolicy) => ({ result: completion, focus, close: vi.fn(), setBounds: vi.fn() }));
   const exchange = vi.fn(async (_code: string, _verifier: string): Promise<ExchangeResult> => ({
     success: true,
     user: { userId: '7' },

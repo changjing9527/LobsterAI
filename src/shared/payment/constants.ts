@@ -1,3 +1,5 @@
+import type { EmbeddedPricingBridge } from './embeddedPricing';
+
 export const PaymentIpc = {
   GetAvailability: 'payment:getAvailability',
   GetCatalog: 'payment:getCatalog',
@@ -158,7 +160,7 @@ export interface PaymentSelectionInput {
   offerToken?: string;
 }
 
-export interface PaymentBridge {
+export interface PaymentBridge extends EmbeddedPricingBridge {
   getAvailability: () => Promise<PaymentAvailability>;
   getCatalog: () => Promise<PaymentResult<PaymentCatalog>>;
   quote: (input: PaymentSelectionInput) => Promise<PaymentResult<PaymentQuoteView>>;

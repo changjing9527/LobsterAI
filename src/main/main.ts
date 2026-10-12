@@ -18,6 +18,7 @@ import {
   session,
   shell,
   type WebContents,
+  WebContentsView,
 } from 'electron';
 import fs from 'fs';
 import os from 'os';
@@ -525,6 +526,7 @@ import {
 } from './libs/openclawTokenProxy';
 import { runLegacyWeixinAllowFromMigration } from './libs/openclawWeixinPairingMigration';
 import { migrateMainAgentWorkspace } from './libs/openclawWorkspaceMigration';
+import { pricingOptionsFromUrl, registerEmbeddedPricingIpcHandlers } from './libs/payment/embeddedPricingView';
 import { ensurePythonRuntimeReady } from './libs/pythonRuntime';
 import { isAnalyticsEndpointUrl, sanitizeUrlForLog, serializeForLog } from './libs/sanitizeForLog';
 import { packageNodeServiceDeployment } from './libs/shareDeployment/nodeServiceDeploymentPackager';
@@ -7393,7 +7395,23 @@ if (!gotTheLock) {
     });
   };
 
+  const embeddedPricing = registerEmbeddedPricingIpcHandlers({
+    ipcMain,
+    getMainWindow: () => mainWindow,
+    resolveLoginUrl: resolveEmbeddedLoginUrl,
+    getServerBaseUrl: getServerApiBaseUrl,
+    getAccountKey: getAuthSessionKey,
+    fetchWithAuth,
+    fetchPublic: (url, options) => net.fetch(url, options),
+    openExternal: url => { void shell.openExternal(url); },
+  });
+
   const embeddedLoginService = new EmbeddedLoginService({
+    onViewChanged: visible => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(AuthIpcChannel.LoginViewChanged, visible);
+      }
+    },
     resolveLoginUrl: resolveEmbeddedLoginUrl,
     createTransaction: () => createLoginTransaction(),
     allowedTopLevelOrigins: () => [new URL(getServerApiBaseUrl()).origin, ...NETEASE_LOGIN_ORIGINS],
@@ -7401,10 +7419,11 @@ if (!gotTheLock) {
       loginUrl,
       policy,
       timeoutMs: EMBEDDED_LOGIN_TIMEOUT_MS,
-      title: t('authLoginWindowTitle'),
       isDev,
       parent: mainWindow && !mainWindow.isDestroyed() ? mainWindow : null,
-      createWindow: options => new BrowserWindow(options),
+      createView: options => new WebContentsView(options),
+      // The service keeps the opaque page visible through URL resolution and the token exchange.
+      onViewChanged: (): void => undefined,
       sessionFromPartition: partition => session.fromPartition(partition),
       openExternal: url => {
         void shell.openExternal(url);
@@ -7414,6 +7433,18 @@ if (!gotTheLock) {
   });
 
   ipcMain.handle(AuthIpcChannel.Login, () => embeddedLoginService.login());
+
+  ipcMain.handle(AuthIpcChannel.CancelLogin, event => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return;
+    embeddedLoginService.cancel();
+  });
+  ipcMain.handle(AuthIpcChannel.SetLoginViewBounds, (event, bounds: unknown) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame) return;
+    if (!bounds || typeof bounds !== 'object') return;
+    const { x, y, width, height } = bounds as Record<string, unknown>;
+    if (typeof x !== 'number' || typeof y !== 'number' || typeof width !== 'number' || typeof height !== 'number') return;
+    embeddedLoginService.setBounds({ x, y, width, height });
+  });
 
   ipcMain.handle(AuthIpcChannel.GetUser, async () => {
     const createUnavailableResponse = () => {
@@ -13197,6 +13228,8 @@ if (!gotTheLock) {
 
   ipcMain.handle(ShellIpc.OpenExternal, async (_event, url: string) => {
     try {
+      const pricingOptions = pricingOptionsFromUrl(url);
+      if (pricingOptions) return await embeddedPricing.open(pricingOptions);
       await shell.openExternal(url);
       return { success: true };
     } catch (error) {

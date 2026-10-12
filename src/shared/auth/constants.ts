@@ -1,4 +1,5 @@
 export const AuthIpcChannel = {
+  CancelLogin: 'auth:cancelLogin',
   ClaimCreditsFinalReward: 'auth:claimCreditsFinalReward',
   GetActiveClientBanner: 'auth:getActiveClientBanner',
   GetActiveClientBanners: 'auth:getActiveClientBanners',
@@ -10,6 +11,8 @@ export const AuthIpcChannel = {
   GetUser: 'auth:getUser',
   LifecycleEvent: 'auth:lifecycleEvent',
   Login: 'auth:login',
+  LoginViewChanged: 'auth:loginViewChanged',
+  SetLoginViewBounds: 'auth:setLoginViewBounds',
   Logout: 'auth:logout',
   QuotaChanged: 'auth:quotaChanged',
   RefreshToken: 'auth:refreshToken',
@@ -17,6 +20,13 @@ export const AuthIpcChannel = {
 } as const;
 
 export type AuthIpcChannel = typeof AuthIpcChannel[keyof typeof AuthIpcChannel];
+
+export interface AuthLoginViewBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
 
 export const AuthLoginFailureReason = {
   Cancelled: 'cancelled',

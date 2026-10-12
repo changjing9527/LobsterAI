@@ -20,6 +20,7 @@ import type {
 import type {
   AuthLifecycleEvent,
   AuthLoginResult,
+  AuthLoginViewBounds,
   AuthRefreshOutcome,
   AuthSessionChangedEvent,
   AuthSessionStatus,
@@ -2033,6 +2034,9 @@ interface IElectronAPI {
     ) => Promise<ActivityResult<ActivityActionResponse>>;
   };
   auth: {
+    cancelLogin: () => Promise<void>;
+    setLoginViewBounds: (bounds: AuthLoginViewBounds) => Promise<void>;
+    onLoginViewChanged: (callback: (visible: boolean) => void) => () => void;
     login: () => Promise<AuthLoginResult & {
       user?: import('../store/slices/authSlice').UserProfile;
       quota?: import('../store/slices/authSlice').UserQuota;

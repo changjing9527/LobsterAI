@@ -98,7 +98,12 @@ describe('matchCompletion and decideNavigation', () => {
   test('completes, allows or blocks navigations', () => {
     expect(decideNavigation(completion, true, policy)).toBe('complete');
     expect(decideNavigation(completion, false, policy)).toBe('complete');
-    expect(decideNavigation('https://lobsterai.youdao.com/portal#/enterprise/identity', true, policy)).toBe('allow');
+    expect(decideNavigation('https://lobsterai.youdao.com/portal#/enterprise/identity-select', true, policy)).toBe('allow');
+    expect(decideNavigation('https://lobsterai.youdao.com/portal#/profile', true, policy)).toBe('block');
+    expect(decideNavigation('https://lobsterai.youdao.com/portal#/pricing', true, policy)).toBe('block');
+    expect(decideNavigation('https://lobsterai.youdao.com/', true, policy)).toBe('block');
+    expect(decideNavigation('https://lobsterai-server.youdao.com/api/auth/openid/login', true, policy)).toBe('allow');
+    expect(decideNavigation('https://lobsterai-server.youdao.com/admin', true, policy)).toBe('block');
     expect(decideNavigation('https://login.netease.com/connect/authorize?x=1', true, policy)).toBe('allow');
     expect(decideNavigation('https://evil.example/', true, policy)).toBe('block');
     expect(decideNavigation('http://lobsterai.youdao.com/portal', true, policy)).toBe('block');

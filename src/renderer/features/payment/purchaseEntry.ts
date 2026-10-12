@@ -1,56 +1,26 @@
-import { getPortalPricingUrl, type PortalPricingKeyfrom } from '../../services/endpoints';
-import { store } from '../../store';
-import { selectIsEnterpriseAccount } from '../enterpriseAccount/selectors';
+import type { EmbeddedPricingOptions } from '@shared/payment/embeddedPricing';
+
+import type { PortalPricingKeyfrom } from '../../services/endpoints';
 import { InAppPurchaseStep, reportInAppPurchase } from './purchaseAnalytics';
 
-export interface PurchaseEntryOptions {
+export interface PurchaseEntryOptions extends EmbeddedPricingOptions {
   keyfrom?: PortalPricingKeyfrom;
-  traceId?: string;
-  offerToken?: string;
-  tab?: 'subscription' | 'boost';
 }
 
-type PurchasePresenter = (options: PurchaseEntryOptions) => void;
-
-let presenter: PurchasePresenter | null = null;
-
-/** The purchase center registers here once mounted; entries only call openPurchase(). */
-export function registerPurchaseCenter(next: PurchasePresenter): () => void {
-  presenter = next;
-  return () => {
-    if (presenter === next) presenter = null;
-  };
-}
-
-const isInAppPaymentEnabled = async (): Promise<boolean> => {
-  try {
-    return (await window.electron.payment.getAvailability()).enabled;
-  } catch {
-    return true;
-  }
-};
-
-/**
- * Opens the in-app purchase dialog, or the Portal pricing page when in-app payment is switched off,
- * the account is an enterprise account, or no purchase center is mounted. Resolves like
- * shell.openExternal so callers keep their result handling.
- */
+/** All recharge and subscription entries open the complete pricing page inside the client. */
 export async function openPurchase(
   options: PurchaseEntryOptions = {},
 ): Promise<{ success: boolean; error?: string }> {
-  const eligible = presenter !== null && !selectIsEnterpriseAccount(store.getState());
-  const inApp = eligible && await isInAppPaymentEnabled();
-  const present = presenter;
   reportInAppPurchase(InAppPurchaseStep.Open, {
-    checkout: inApp && present ? 'in_app' : 'portal',
+    checkout: 'in_app',
     keyfrom: options.keyfrom,
     traceId: options.traceId,
     tab: options.tab,
     offerTokenAttached: Boolean(options.offerToken),
   });
-  if (inApp && present) {
-    present(options);
-    return { success: true };
+  try {
+    return await window.electron.payment.openPricing(options);
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unable to open pricing' };
   }
-  return window.electron.shell.openExternal(getPortalPricingUrl(options.keyfrom, options));
 }

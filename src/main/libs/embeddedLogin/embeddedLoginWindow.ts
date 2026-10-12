@@ -1,7 +1,9 @@
 import crypto from 'crypto';
-import type { BrowserWindow, BrowserWindowConstructorOptions, Session } from 'electron';
+import type { BrowserWindow, Session, WebContentsView, WebContentsViewConstructorOptions } from 'electron';
 
-import { AuthLoginFailureReason } from '../../../shared/auth/constants';
+import { AuthLoginFailureReason, type AuthLoginViewBounds } from '../../../shared/auth/constants';
+import { ClientAccountLayout, EmbeddedPortalPage } from '../../../shared/payment/embeddedPricing';
+import { revealEmbeddedPortal } from './embeddedPortalPresentation';
 import {
   decideNavigation,
   isExternalLinkAllowed,
@@ -29,16 +31,18 @@ export interface EmbeddedLoginCompletion {
 export interface EmbeddedLoginWindowHandle {
   result: Promise<EmbeddedLoginCompletion>;
   focus(): void;
+  close(): void;
+  setBounds(bounds: AuthLoginViewBounds): void;
 }
 
 export interface EmbeddedLoginWindowOptions {
   loginUrl: string;
   policy: NavigationPolicy;
   timeoutMs: number;
-  title: string;
   isDev: boolean;
   parent: BrowserWindow | null;
-  createWindow: (options: BrowserWindowConstructorOptions) => BrowserWindow;
+  createView: (options: WebContentsViewConstructorOptions) => WebContentsView;
+  onViewChanged: (visible: boolean) => void;
   sessionFromPartition: (partition: string) => Session;
   openExternal: (url: string) => void;
 }
@@ -63,6 +67,9 @@ const originForLog = (url: string): string => {
  * completion URL, which is intercepted here and never reaches the network.
  */
 export function openEmbeddedLoginWindow(options: EmbeddedLoginWindowOptions): EmbeddedLoginWindowHandle {
+  const parent = options.parent;
+  if (!parent || parent.isDestroyed()) throw new EmbeddedLoginError(AuthLoginFailureReason.LoadFailed);
+  const parentContents = parent.webContents;
   const partition = `lobsterai-login-${crypto.randomUUID()}`;
   const loginSession = options.sessionFromPartition(partition);
   const { origin, completionPath } = options.policy.target;
@@ -74,18 +81,7 @@ export function openEmbeddedLoginWindow(options: EmbeddedLoginWindowOptions): Em
     (_details, callback) => callback({ cancel: true }),
   );
 
-  // Not modal: a macOS sheet has no close button, and the Portal page has no cancel control.
-  const window = options.createWindow({
-    width: 480,
-    height: 680,
-    minWidth: 400,
-    minHeight: 560,
-    parent: options.parent ?? undefined,
-    title: options.title,
-    autoHideMenuBar: true,
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
+  const view = options.createView({
     webPreferences: {
       partition,
       sandbox: true,
@@ -97,7 +93,18 @@ export function openEmbeddedLoginWindow(options: EmbeddedLoginWindowOptions): Em
       navigateOnDragDrop: false,
     },
   });
-  window.setMenu(null);
+  const contents = view.webContents;
+  // The only client chrome is the close control; the remote page fills the remaining content area.
+  let headerHeight = Math.round(ClientAccountLayout.HeaderHeight * parentContents.getZoomFactor());
+  const resize = (): void => {
+    if (parent.isDestroyed() || contents.isDestroyed()) return;
+    const { width, height } = parent.getContentBounds();
+    view.setBounds({ x: 0, y: Math.min(headerHeight, height), width, height: Math.max(0, height - headerHeight) });
+  };
+  view.setBackgroundColor(ClientAccountLayout.Background);
+  view.setVisible(false);
+  resize();
+  parent.contentView.addChildView(view);
 
   let settled = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -112,14 +119,48 @@ export function openEmbeddedLoginWindow(options: EmbeddedLoginWindowOptions): Em
     if (settled) return;
     settled = true;
     clearTimeout(timer);
+    parent.removeListener('resize', resize);
+    parent.removeListener('closed', cancel);
+    parentContents.removeListener('did-start-navigation', onParentNavigation);
+    if (!parent.isDestroyed()) {
+      parent.contentView.removeChildView(view);
+      options.onViewChanged(false);
+      parentContents.focus();
+    }
+    if (!contents.isDestroyed()) contents.close();
+    void loginSession.clearStorageData().catch((): void => undefined);
+    void loginSession.clearCache().catch((): void => undefined);
     if (outcome instanceof EmbeddedLoginError) rejectResult(outcome);
     else resolveResult(outcome);
-    if (!window.isDestroyed()) window.close();
   };
+
+  const cancel = (): void => settle(new EmbeddedLoginError(AuthLoginFailureReason.Cancelled));
+  const onParentNavigation = (_event: unknown, _url: string, _inPlace: boolean, isMainFrame: boolean): void => {
+    if (isMainFrame) cancel();
+  };
+  parent.on('resize', resize);
+  parent.on('closed', cancel);
+  parentContents.on('did-start-navigation', onParentNavigation);
+  contents.on('before-input-event', (event, input) => {
+    if (input.key === 'Escape') {
+      event.preventDefault();
+      cancel();
+    }
+  });
+  contents.on('destroyed', cancel);
+  contents.on('dom-ready', () => {
+    void revealEmbeddedPortal(view, origin, EmbeddedPortalPage.Login).catch(error => {
+      console.error('[EmbeddedLogin] failed to apply the client layout', error);
+      settle(new EmbeddedLoginError(AuthLoginFailureReason.LoadFailed));
+    });
+  });
 
   const handleNavigation = (event: NavigationEvent): void => {
     const decision = decideNavigation(event.url, event.isMainFrame, options.policy);
-    if (decision === 'allow') return;
+    if (decision === 'allow') {
+      if (event.isMainFrame) view.setVisible(false);
+      return;
+    }
     event.preventDefault();
     if (decision === 'complete') {
       const match = matchCompletion(event.url, options.policy.target);
@@ -131,43 +172,55 @@ export function openEmbeddedLoginWindow(options: EmbeddedLoginWindowOptions): Em
     );
   };
 
-  window.webContents.setWindowOpenHandler(({ url }) => {
+  contents.setWindowOpenHandler(({ url }) => {
     if (isExternalLinkAllowed(url)) options.openExternal(url);
     return { action: 'deny' };
   });
-  window.webContents.on('will-navigate', details => handleNavigation(details));
-  window.webContents.on('will-redirect', details => handleNavigation(details));
-  window.webContents.on('will-frame-navigate', details => {
+  contents.on('will-navigate', details => handleNavigation(details));
+  contents.on('will-redirect', details => handleNavigation(details));
+  contents.on('will-frame-navigate', details => {
     // will-navigate already covers the main frame.
     if (!details.isMainFrame) handleNavigation(details);
   });
-  window.webContents.on('did-fail-load', (_event, errorCode, _description, validatedURL, isMainFrame) => {
+  contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
+    if (!isMainFrame || settled || decideNavigation(url, true, options.policy) === 'allow') return;
+    const completion = matchCompletion(url, options.policy.target);
+    if (completion.kind === 'completion') {
+      settle({ code: completion.code, state: completion.state });
+      return;
+    }
+    view.setVisible(false);
+    void contents.loadURL(options.loginUrl).catch((): void => undefined);
+  });
+  contents.on('did-fail-load', (_event, errorCode, _description, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === ERR_ABORTED || settled) return;
     if (matchCompletion(validatedURL, options.policy.target).kind === 'completion') return;
     console.warn(`[EmbeddedLogin] login page failed to load (code=${errorCode})`);
     settle(new EmbeddedLoginError(AuthLoginFailureReason.LoadFailed));
   });
-  window.on('closed', () => {
-    void loginSession.clearStorageData().catch((): void => undefined);
-    void loginSession.clearCache().catch((): void => undefined);
-    settle(new EmbeddedLoginError(AuthLoginFailureReason.Cancelled));
-  });
-
   timer = setTimeout(
     () => settle(new EmbeddedLoginError(AuthLoginFailureReason.Timeout)),
     options.timeoutMs,
   );
-  window.loadURL(options.loginUrl).catch(error => {
+  options.onViewChanged(true);
+  void contents.loadURL(options.loginUrl).catch(error => {
     // did-fail-load reports real failures; a superseded initial navigation also rejects here.
     console.debug('[EmbeddedLogin] initial navigation did not finish:', error instanceof Error ? error.message : error);
   });
 
   return {
     result,
+    close: cancel,
+    setBounds: bounds => {
+      if (settled || !Object.values(bounds).every(Number.isFinite)) return;
+      headerHeight = Math.max(36, Math.round(bounds.y * parentContents.getZoomFactor()));
+      resize();
+    },
     focus: () => {
-      if (window.isDestroyed()) return;
-      if (window.isMinimized()) window.restore();
-      window.focus();
+      if (settled || parent.isDestroyed()) return;
+      if (parent.isMinimized()) parent.restore();
+      parent.focus();
+      contents.focus();
     },
   };
 }
