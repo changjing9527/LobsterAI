@@ -288,7 +288,7 @@
     "jszip": "^3.10.1",
     "katex": "^0.16.21",
     "lottie-react": "^2.4.1",
-    "mermaid": "^10.9.5",
+    "mermaid": "^12.1.0",
     "micromark-util-normalize-identifier": "^1.1.0",
     "npm": "^11.11.0",
     "pdfjs-dist": "^4.10.38",
