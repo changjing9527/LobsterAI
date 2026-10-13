@@ -3,6 +3,7 @@ import {
   AuthSessionStatus,
   type AuthSessionStatus as AuthSessionStatusValue,
 } from '@shared/auth/constants';
+import type { SubscriptionManagement } from '@shared/auth/subscription';
 
 import { type CreditQuotaSnapshot, getCreditQuotaSnapshot } from '../../services/lowCreditPurchaseOffer';
 
@@ -17,7 +18,7 @@ export interface UserProfile {
   accountMode?: 'personal' | 'enterprise';
 }
 
-export interface UserQuota {
+export interface UserQuota extends SubscriptionManagement {
   planName: string;           // "免费", "标准", "进阶", "专业"
   subscriptionStatus: string; // "free" | "active" | "enterprise"
   creditsLimit: number;       // total credits limit
@@ -104,7 +105,7 @@ export interface CampaignPresentation {
   iconUrl?: string | null;
 }
 
-export interface ProfileSummary {
+export interface ProfileSummary extends SubscriptionManagement {
   id: number;
   nickname: string;
   avatarUrl: string | null;

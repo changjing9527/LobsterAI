@@ -1,4 +1,5 @@
 import { ArrowPathIcon, ChevronRightIcon } from '@heroicons/react/24/outline';
+import { getAppleSubscriptionManagementUrl, hasAppleSubscription } from '@shared/auth/subscription';
 import React, {
   useCallback,
   useEffect,
@@ -47,6 +48,7 @@ import {
   type StartupCreditCampaignEntry,
   useStartupCreditCampaignEntry,
 } from './startupCreditCampaignBridge';
+import type { ToastEventDetail } from './Toast';
 import {
   DailyCheckInLoadResultStatus,
   type DailyCheckInSnapshot,
@@ -294,6 +296,10 @@ const UserMenu: React.FC<UserMenuProps> = ({
   const user = useSelector((state: RootState) => state.auth.user);
   const quota = useSelector((state: RootState) => state.auth.quota);
   const profileSummary = useSelector((state: RootState) => state.auth.profileSummary);
+  const subscriptionManagement = profileSummary?.subscriptionProvider !== undefined
+    ? profileSummary
+    : quota;
+  const appleSubscription = user?.accountMode !== 'enterprise' && hasAppleSubscription(subscriptionManagement);
   const isEn = i18nService.getLanguage() === 'en';
   // The menu fetches on mount, so start in the loading state to avoid a
   // one-frame "--" flash before the mount effect runs.
@@ -424,7 +430,29 @@ const UserMenu: React.FC<UserMenuProps> = ({
     }
   };
 
+  const handleManageApple = async () => {
+    const result = await window.electron.shell.openExternal(
+      getAppleSubscriptionManagementUrl(subscriptionManagement),
+    ).catch(() => ({ success: false }));
+    if (!result.success) {
+      window.dispatchEvent(new CustomEvent('app:showToast', {
+        detail: i18nService.t('authAppleSubscriptionOpenFailed'),
+      }));
+    }
+  };
+
   const handleUpgradePlan = async () => {
+    if (appleSubscription) {
+      window.dispatchEvent(new CustomEvent<ToastEventDetail>('app:showToast', {
+        detail: {
+          message: i18nService.t('authAppleSubscriptionUpgradeHint'),
+          actionLabel: i18nService.t('authOpenAppleSubscription'),
+          onAction: () => { void handleManageApple(); },
+        },
+      }));
+      onClose();
+      return;
+    }
     const accountPlanAnalytics = getAccountPlanAnalyticsContext({
       accountMode: user?.accountMode ?? quota?.accountMode,
       creditItems,

@@ -1,3 +1,4 @@
+import type { SubscriptionManagement } from '@shared/auth/subscription';
 import type { OwnershipApi } from '@shared/ownership/types';
 
 import type { OpenClawSessionPatch } from '../../common/openclawSession';
@@ -606,7 +607,7 @@ interface CreditsFinalRewardClaimData {
   expiresAt: string;
 }
 
-interface ProfileSummaryData {
+interface ProfileSummaryData extends SubscriptionManagement {
   id: number;
   nickname: string;
   avatarUrl: string | null;
